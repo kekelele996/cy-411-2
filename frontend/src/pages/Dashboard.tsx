@@ -1,29 +1,86 @@
 import { useEffect } from 'react';
+import { ArrowDownOutlined, ArrowUpOutlined, MinusOutlined } from '@ant-design/icons';
 import { Card, Col, Row, Space, Statistic, Typography } from 'antd';
 import { CarbonTrendChart } from '../components/common/CarbonTrendChart';
 import { GoalProgressCard } from '../components/common/GoalProgressCard';
 import { EmptyState } from '../components/common/EmptyState';
 import { useActivityStore } from '../stores/activityStore';
 import { useGoalStore } from '../stores/goalStore';
-import { useCarbonStats } from '../hooks/useCarbonStats';
+import { useCarbonStats, ComparisonResult } from '../hooks/useCarbonStats';
 import { useAuth } from '../hooks/useAuth';
-import { getMonthRange } from '../utils/dateRange';
+import { getLastMonthRange, getMonthRange, getSameMonthLastYearRange } from '../utils/dateRange';
 import { formatCarbon } from '../utils/formatters';
+
+function renderTrendIcon(trend: ComparisonResult['trend']) {
+  if (trend === 'up') {
+    return <ArrowUpOutlined style={{ color: '#c84f31' }} />;
+  }
+  if (trend === 'down') {
+    return <ArrowDownOutlined style={{ color: '#2f7d59' }} />;
+  }
+  return <MinusOutlined style={{ color: '#999' }} />;
+}
+
+function getTrendColor(trend: ComparisonResult['trend']) {
+  if (trend === 'up') return '#c84f31';
+  if (trend === 'down') return '#2f7d59';
+  return '#999';
+}
+
+function CompareStatCard({
+  title,
+  comparison,
+  compareLabel
+}: {
+  title: string;
+  comparison: ComparisonResult;
+  compareLabel: string;
+}) {
+  const trendColor = getTrendColor(comparison.trend);
+  return (
+    <Card>
+      <Statistic
+        title={title}
+        value={formatCarbon(comparison.current)}
+        valueStyle={{ fontSize: 20, fontWeight: 600 }}
+      />
+      <Space direction="vertical" size={4} style={{ marginTop: 12, width: '100%' }}>
+        <div className="muted" style={{ fontSize: 12 }}>
+          {compareLabel}：{formatCarbon(comparison.compare)}
+        </div>
+        <Space size={8} style={{ fontSize: 13 }}>
+          {renderTrendIcon(comparison.trend)}
+          <span style={{ color: trendColor, fontWeight: 500 }}>
+            {comparison.trend === 'flat' ? '持平' : `${comparison.diff > 0 ? '+' : ''}${comparison.diff.toFixed(2)} kg CO2e`}
+          </span>
+          <span style={{ color: trendColor, fontWeight: 500 }}>
+            ({comparison.trend === 'flat' ? '0.00' : `${comparison.diffPercent > 0 ? '+' : ''}${comparison.diffPercent.toFixed(2)}`}%)
+          </span>
+        </Space>
+      </Space>
+    </Card>
+  );
+}
 
 export function Dashboard() {
   const rows = useActivityStore((state) => state.rows);
-  const loadActivities = useActivityStore((state) => state.load);
+  const rowsByPeriod = useActivityStore((state) => state.rowsByPeriod);
+  const loadPeriod = useActivityStore((state) => state.loadPeriod);
   const goals = useGoalStore((state) => state.goals);
   const loadGoals = useGoalStore((state) => state.load);
   const { token } = useAuth();
-  const stats = useCarbonStats(rows);
+  const stats = useCarbonStats(rowsByPeriod.current, rowsByPeriod.lastMonth, rowsByPeriod.lastYear);
 
   useEffect(() => {
     if (!token) return;
-    const [start, end] = getMonthRange();
-    void loadActivities({ start, end });
+    const monthRange = getMonthRange();
+    const lastMonthRange = getLastMonthRange();
+    const sameMonthLastYearRange = getSameMonthLastYearRange();
+    void loadPeriod('current', { start: monthRange[0], end: monthRange[1] });
+    void loadPeriod('lastMonth', { start: lastMonthRange[0], end: lastMonthRange[1] });
+    void loadPeriod('lastYear', { start: sameMonthLastYearRange[0], end: sameMonthLastYearRange[1] });
     void loadGoals();
-  }, [loadActivities, loadGoals, token]);
+  }, [loadPeriod, loadGoals, token]);
 
   return (
     <Space direction="vertical" size={20} style={{ width: '100%' }}>
@@ -37,9 +94,25 @@ export function Dashboard() {
         <Col xs={24} md={8}><Card><Statistic title="本月排放" value={formatCarbon(stats.monthTotal)} /></Card></Col>
       </Row>
       <Row gutter={[16, 16]}>
+        <Col xs={24} md={12}>
+          <CompareStatCard
+            title="本月 vs 上月"
+            comparison={stats.lastMonthComparison}
+            compareLabel="上月排放"
+          />
+        </Col>
+        <Col xs={24} md={12}>
+          <CompareStatCard
+            title="本月 vs 去年同期"
+            comparison={stats.lastYearComparison}
+            compareLabel="去年同期排放"
+          />
+        </Col>
+      </Row>
+      <Row gutter={[16, 16]}>
         <Col xs={24} lg={15}>
           <Card title="碳排趋势">
-            <CarbonTrendChart data={stats.trend} />
+            <CarbonTrendChart compareSeries={stats.compareTrendSeries} data={stats.trend} />
           </Card>
         </Col>
         <Col xs={24} lg={9}>
